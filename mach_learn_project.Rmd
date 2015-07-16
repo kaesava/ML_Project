@@ -1,0 +1,75 @@
+Project Submission for Coursera "Practical Machine Learning" Course Project
+------------------------
+Author: Kesh K
+
+##Overview
+
+This report is the project submission for Coursera "Practical Machine
+Learning" Course Project.
+
+We use data from accelerometers on the belt, forearm, arm, and dumbell of 
+6 participants to build a model to determine if the barbell lifts were 
+being performed correctly or incorrectly.
+
+The data for this project come from this source: 
+http://groupware.les.inf.puc-rio.br/har.
+
+Please refer to this paper for more information: Velloso, E.; Bulling, A.;
+Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of
+Weight Lifting Exercises. Proceedings of 4th International Conference in
+Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM
+SIGCHI, 2013.
+
+The authors have very kindly made the data available for this kind of assignment.
+
+The training and testing datasets were downloaded on 16-Jul-2015 at 11:45AM
+Australian Eastern Standard time AEST from the links below:
+training: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+testing: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+First we loaded R libraries that we will use (ggplot2 for plotting and caret 
+for data mining related functions). We set the seed for reproducibility 
+and read the training and testing csv files that we downloaded into datasets.
+
+```{r echo=TRUE, cache=TRUE}
+training <- read.table("pml-training.csv", header=TRUE, sep=",", 
+                   na.strings="NA", comment.char="",nrows = 19624, quote="\"")
+testing <- read.table("pml-testing.csv", header=TRUE, sep=",",
+                  na.strings="NA", comment.char="",nrows = 21, quote="\"")
+
+require(ggplot2)
+require(caret)
+
+set.seed(3433)
+```
+
+model1 = train(classe~., method="glm", data=training)
+confusionMatrix(predict(model1, testing), testing$classe)
+
+preProcessModel <- preProcess(training[,-1], method="pca", thresh=0.8)
+pca_training <- predict(preProcessModel, training[,-1])
+model2 <- train(training$classe~., method="glm", data=pca_training)
+
+pca_testing <- predict(preProcessModel, testing[,-1])
+confusionMatrix(predict(model2, pca_testing), testing$classe)
+
+
+###
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+
+1. Your submission should consist of a link to a Github repo with your R markdown and compiled HTML file describing your analysis. Please constrain the text of the writeup to < 2000 words and the number of figures to be less than 5. It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online (and you always want to make it easy on graders :-).
+2. You should also apply your machine learning algorithm to the 20 test cases available in the test data above. Please submit your predictions in appropriate format to the programming assignment for automated grading. See the programming assignment for additional details. 
+
+
+Does the submission build a machine learning algorithm to predict activity quality from activity monitors?
+
+To evaluate the HTML file you may have to download the repo and open the compiled HTML document. 
+
+Alternatively if they have submitted a repo with a gh-pages branch, you may be able to view the HTML page on the web.
+
+Do the authors describe what they expect the out of sample error to be and estimate the error appropriately with cross-validation?
+
+Please use the space below to provide constructive feedback to the student who submitted the work. Point out the submission's strengths and identify some areas for improvement. You may also use this space to explain your grading decisions.
+
+As far as you can determine, does it appear that the work submitted for this project is the work of the student who submitted it? 
