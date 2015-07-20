@@ -65,19 +65,22 @@ img {
 <h2>Project Submission for Coursera “Practical Machine Learning” Course Project</h2>
 <p>Author: Kesh K</p>
 </div>
-<div id="overview" class="section level2">
-<h2>Overview</h2>
+<div id="overview-and-data-source" class="section level2">
+<h2>Overview and Data Source</h2>
 <p>This report is the project submission for Coursera “Practical Machine Learning” Course Project.</p>
 <p>We use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to build a model to determine if the barbell lifts were being performed correctly or incorrectly.</p>
 <p>The data for this project come from this source: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a>.</p>
 <p>The authors have very kindly made the data available for this kind of assignment.</p>
-<p>The training and testing datasets were downloaded on 16-Jul-2015 at 11:45AM Australian Eastern Standard time AEST from the links below: training: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" class="uri">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv</a> testing: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv" class="uri">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv</a></p>
-<p>First we loaded R libraries that we will use. We set the seed for reproducibility and take advantage of available parallel processing.</p>
-<p>We then read the training and testing csv files that we downloaded into datasets. Exploring the data, it is clear that missing values are coded as “NA”. However there are also values coded as “#DIV/0!”, which presumably is an error from a spreadsheeting program like Excel. We mark these as NA too.</p>
-<pre class="r"><code>require(dplyr)
-require(ggplot2)
+<p>The training and testing datasets were downloaded on 16-Jul-2015 at 11:45AM Australian Eastern Standard time AEST from the links below:</p>
+<p>training: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" class="uri">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv</a></p>
+<p>testing: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv" class="uri">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv</a></p>
+</div>
+<div id="environment-setup-and-data-load" class="section level2">
+<h2>Environment Setup and Data Load</h2>
+<p>First we loaded R libraries that we will use. We set the seed for reproducibility and take advantage of available parallel processing using the “doParallel” library and setting the number of threads.</p>
+<p>We then read the training and testing csv files that we downloaded into datasets. Exploring the data, it is clear that missing values are coded as “NA”. However there are also values coded as “#DIV/0!”, which presumably is an error from a spreadsheeting program like Excel. We mark these as NA too since we do not know what the true value might be.</p>
+<pre class="r"><code>require(ggplot2)
 require(caret)
-require(klaR)
 require(doParallel)
 
 set.seed(3433)
@@ -88,6 +91,9 @@ training &lt;- read.table(&quot;pml-training.csv&quot;, header=TRUE, sep=&quot;,
     na.strings=c(&quot;NA&quot;, &quot;#DIV/0!&quot;), comment.char=&quot;&quot;,nrows = 19624, quote=&quot;\&quot;&quot;)
 testing &lt;- read.table(&quot;pml-testing.csv&quot;, header=TRUE, sep=&quot;,&quot;,
     na.strings=c(&quot;NA&quot;, &quot;#DIV/0!&quot;), comment.char=&quot;&quot;,nrows = 21, quote=&quot;\&quot;&quot;)</code></pre>
+</div>
+<div id="data-cleansing---missing-values-and-extraneous-predictors" class="section level2">
+<h2>Data Cleansing - Missing Values and extraneous predictors</h2>
 <p>We investigate the training dataset for missing values.</p>
 <pre class="r"><code>fields_with_missing_vals &lt;- sapply(training, function(x) sum(is.na(x)))
 table(fields_with_missing_vals)</code></pre>
@@ -97,44 +103,61 @@ table(fields_with_missing_vals)</code></pre>
 ## 19296 19299 19300 19301 19622 
 ##     2     1     4     2     6</code></pre>
 <p>There are 60 fields with no missing values, and 100 with 19,216 or more missing values! Given we only have 19,622 records in the training data set, including these fields with over ~98% missing values will skew the results. We exclude them from the analysis.</p>
-<p>Further: Looking at the data, it seems like the data with missing values are functions (like max, min, skewness, etc.) of existing raw data columns.</p>
+<p>Further: Looking at the data, it seems like most columns with missing values are functions (like max, min, skewness, etc.) of existing raw data columns.</p>
 <pre class="r"><code>clean_training &lt;- training[, fields_with_missing_vals == 0]</code></pre>
-<p>Also, the first field (serial #) and user name and date fields qualify each record and for the purpose of this exercise, and so we exclude them in the analysis. The time-stamp and window fields are also markers for time-frame related data and while a full time-series analysis might include them, we exclude them to focus on the time-independent impact of the measurement variables on the classe.</p>
+<p>Also, the first field (serial #) and user name qualify each record and for the purpose of this exercise, we exclude them in the analysis as they will add little predictive value. The time-stamp and window fields are also markers for time-frame related data and while a full time-series analysis might include them, we exclude them to focus on the time-independent impact of the measurement variables on the classe variable. Incidentally, the test dataset has these values missing.</p>
 <pre class="r"><code>clean_training &lt;- clean_training[, -c(1:7)]</code></pre>
-<p>We then run a Principal components analysis to determine variables that have the most impact (account for most discrimination/variance) on the classe variable. We use a variance threshold of 85%. This significantly reduces the domain space while largely keeping the impactful variables. We remove the last (classe) variable when building the pre-processing model.</p>
+</div>
+<div id="principal-components-analysis" class="section level2">
+<h2>Principal Components Analysis</h2>
+<p>We then run a Principal components analysis (pca) to determine variables that have the most impact (account for most discrimination/variance) on the classe variable. We use a variance threshold of 85%. This significantly reduces the domain space while largely keeping the impactful variables. We remove the last (classe) variable when building the pre-processing (pca) model.</p>
 <pre class="r"><code>prePModel &lt;- preProcess(clean_training[,-53], method=&quot;pca&quot;, thresh = 0.85)
 clean_pca_training &lt;- predict(prePModel, clean_training[,-53])</code></pre>
 <p>The dataset now has 15 columns/predictors instead of 52 predictors.</p>
+</div>
+<div id="building-a-training-model" class="section level2">
+<h2>Building a Training Model</h2>
 <p>Since we do not have separate testing and validation data sets, we choose to use 10-fold cross-validation, which is quite commonly used to ensure that the model is not over-fit to the training set; i.e., the out of sample error rate is more realistic (less optimistic). Effectively, the training set is partitioned 10 times and one partition is used as the testing (validation) dataset and the others as training, and this is repeated for each partition; the best aggregate model is selected.</p>
+<p>We elected to use the Random Forest training algorithm as they known for their high accuracy while not over-fitting to the training dataset, especially when used in conjunction with cross-validation, which is what we have done.</p>
 <pre class="r"><code>trc &lt;- trainControl(method = &quot;cv&quot;, number = 10)
 model &lt;- train(clean_pca_training, clean_training$classe, 
                method=&quot;rf&quot;, trControl=trc)</code></pre>
-<pre><code>## Loading required package: randomForest</code></pre>
-<pre><code>## Warning: package 'randomForest' was built under R version 3.2.1</code></pre>
-<pre><code>## randomForest 4.6-10
-## Type rfNews() to see new features/changes/bug fixes.
-## 
-## Attaching package: 'randomForest'
-## 
-## The following object is masked from 'package:dplyr':
-## 
-##     combine</code></pre>
-<p>We expect the out-of-sample error to be 97.7.</p>
-<p>We now prepate the testing dataset in the same way we prepared the training dataset. We remove missing value fields (only the same ones we removed in the training set) and the first 7 columns (again, the same ones we removed in the training set). We apply the same Principal Components model that we applied in the training set to the testing set (here we remove the last column which is the problem_id)</p>
+</div>
+<div id="out-of-sample-error" class="section level2">
+<h2>Out-of-sample Error</h2>
+<p>We expect the out-of-sample error % to be:</p>
+<pre class="r"><code>sprintf(&quot;%1.2f%%&quot;, 100 - round(max(model$results$Accuracy)*100,1))</code></pre>
+<pre><code>## [1] &quot;2.40%&quot;</code></pre>
+<p>or typically larger. This is the percentage of mis-classified records (1 minus the accuracy).</p>
+</div>
+<div id="preparing-the-testing-dataset" class="section level2">
+<h2>Preparing the Testing Dataset</h2>
+<p>We now prepare the testing dataset in the same way we prepared the training dataset. We remove missing value fields (only the same ones we removed in the training set) and the first 7 columns (again, the same ones we removed in the training set). We apply the same Principal Components model that we applied in the training set to the testing set (here we remove the last column which is the problem_id).</p>
 <pre class="r"><code>clean_testing &lt;- testing[, fields_with_missing_vals == 0]
 clean_testing &lt;- clean_testing[, -c(1:7)]
-clean_pca_testing &lt;- predict(prePModel, clean_testing[,-53])
-answers &lt;- as.character(predict(model, clean_pca_testing))</code></pre>
-<div id="section" class="section level3">
-<h3></h3>
-<p>d: cd D:309144_project_Project cp D:309144_learn_project.Rmd . cp D:309144_learn_project.html index.html git add . git commit -m “submission of first attempt” git push origin gh-pages</p>
-<p>Does the submission build a machine learning algorithm to predict activity quality from activity monitors?</p>
-<p>To evaluate the HTML file you may have to download the repo and open the compiled HTML document.</p>
-<p>Alternatively if they have submitted a repo with a gh-pages branch, you may be able to view the HTML page on the web.</p>
-<p>Do the authors describe what they expect the out of sample error to be and estimate the error appropriately with cross-validation?</p>
-<p>Please use the space below to provide constructive feedback to the student who submitted the work. Point out the submission’s strengths and identify some areas for improvement. You may also use this space to explain your grading decisions.</p>
-<p>As far as you can determine, does it appear that the work submitted for this project is the work of the student who submitted it?</p>
+clean_pca_testing &lt;- predict(prePModel, clean_testing[,-53])</code></pre>
 </div>
+<div id="predicting-test-data" class="section level2">
+<h2>Predicting Test data</h2>
+<p>We then predict using the model on the cleansed (PCA-applied) testing dataset and save the data as a character vector for outputting in a format friendly for submission.</p>
+<pre class="r"><code>answers &lt;- as.character(predict(model, clean_pca_testing))</code></pre>
+</div>
+<div id="saving-predictions" class="section level2">
+<h2>Saving predictions</h2>
+<p>We define a pml_write file to output answers in a format that can be used to upload to get test results and run it to produce the output files.</p>
+<pre class="r"><code>pml_write_files = function(x) {
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0(&quot;problem_id_&quot;,i,&quot;.txt&quot;)
+        write.table(x[i], file=filename, quote=FALSE, row.names=FALSE, 
+            col.names=FALSE)
+    }
+}
+pml_write_files(answers)</code></pre>
+</div>
+<div id="conclusion" class="section level2">
+<h2>Conclusion</h2>
+<p>In this report, we explored the training dataset and pre-processed it by removing extraneous predictors via missing data analysis, principal components for the outcome “classe” variable. We then fit a random forest algorithm model using 10-fold cross validation and predicted test values.</p>
 </div>
 
 
