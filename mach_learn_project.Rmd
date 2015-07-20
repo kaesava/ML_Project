@@ -14,37 +14,116 @@ being performed correctly or incorrectly.
 The data for this project come from this source: 
 http://groupware.les.inf.puc-rio.br/har.
 
-Please refer to this paper for more information: Velloso, E.; Bulling, A.;
-Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of
-Weight Lifting Exercises. Proceedings of 4th International Conference in
-Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM
-SIGCHI, 2013.
-
-The authors have very kindly made the data available for this kind of assignment.
+The authors have very kindly made the data available for this kind of
+assignment.
 
 The training and testing datasets were downloaded on 16-Jul-2015 at 11:45AM
 Australian Eastern Standard time AEST from the links below:
 training: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
 testing: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 
-First we loaded R libraries that we will use (ggplot2 for plotting and caret 
-for data mining related functions). We set the seed for reproducibility 
-and read the training and testing csv files that we downloaded into datasets.
+First we loaded R libraries that we will use. We set the seed for 
+reproducibility and take advantage of available parallel processing.
 
-```{r echo=TRUE, cache=TRUE}
-training <- read.table("pml-training.csv", header=TRUE, sep=",", 
-                   na.strings="NA", comment.char="",nrows = 19624, quote="\"")
-testing <- read.table("pml-testing.csv", header=TRUE, sep=",",
-                  na.strings="NA", comment.char="",nrows = 21, quote="\"")
+We then read the training and testing csv files that we downloaded into
+datasets. Exploring the data, it is clear that missing values are coded as
+"NA". However there are also values coded as "#DIV/0!", which presumably is
+an error from a spreadsheeting program like Excel. We mark these as NA too.
 
+```{r echo=TRUE, cache=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+require(dplyr)
 require(ggplot2)
 require(caret)
+require(klaR)
+require(doParallel)
 
 set.seed(3433)
+
+registerDoParallel(cores=2)
+
+training <- read.table("pml-training.csv", header=TRUE, sep=",", 
+    na.strings=c("NA", "#DIV/0!"), comment.char="",nrows = 19624, quote="\"")
+testing <- read.table("pml-testing.csv", header=TRUE, sep=",",
+    na.strings=c("NA", "#DIV/0!"), comment.char="",nrows = 21, quote="\"")
 ```
 
-model1 = train(classe~., method="glm", data=training)
-confusionMatrix(predict(model1, testing), testing$classe)
+We investigate the training dataset for missing values.
+
+```{r echo=TRUE, cache=FALSE}
+fields_with_missing_vals <- sapply(training, function(x) sum(is.na(x)))
+table(fields_with_missing_vals)
+```
+
+There are 60 fields with no missing values, and 100 with 19,216 or more 
+missing values! Given we only have 19,622 records in the training data set,
+including these fields with over ~98% missing values will skew the results.
+We exclude them from the analysis.
+
+Further: Looking at the data, it seems like the data with
+missing values are functions (like max, min, skewness, etc.) of existing raw
+data columns.
+
+```{r echo=TRUE, cache=FALSE}
+clean_training <- training[, fields_with_missing_vals == 0]
+```
+
+Also, the first field (serial #) and user name and date fields qualify each
+record and for the purpose of this exercise, and so we exclude them in the
+analysis. The time-stamp and window fields are also markers for time-frame
+related data and while a full time-series analysis might include them, we
+exclude them to focus on the time-independent impact of the measurement
+variables on the classe.
+
+```{r echo=TRUE, cache=FALSE}
+clean_training <- clean_training[, -c(1:7)]
+```
+
+We then run a Principal components analysis to determine variables that
+have the most impact (account for most discrimination/variance) on the classe
+variable. We use a variance threshold of 85%. This significantly reduces
+the domain space while largely keeping the impactful variables. We remove the
+last (classe) variable when building the pre-processing model.
+
+```{r echo=TRUE, cache=FALSE}
+prePModel <- preProcess(clean_training[,-53], method="pca", thresh = 0.85)
+clean_pca_training <- predict(prePModel, clean_training[,-53])
+```
+
+The dataset now has `r dim(clean_pca_training)[2]` columns/predictors instead
+of `r dim(clean_training[,-53])[2]` predictors.
+
+Since we do not have separate testing and validation data sets, we choose 
+to use 10-fold cross-validation, which is quite commonly used to ensure
+that the model is not over-fit to the training set; i.e., the out of sample
+error rate is more realistic (less optimistic). Effectively, the training
+set is partitioned 10 times and one partition is used as the testing 
+(validation) dataset and the others as training, and this is repeated for
+each partition; the best aggregate model is selected.
+
+```{r echo=TRUE, cache=TRUE}
+trc <- trainControl(method = "cv", number = 10)
+model <- train(clean_pca_training, clean_training$classe, 
+               method="rf", trControl=trc)
+```
+
+Interestingly, the in-sample error (which of course is usually an optimistic
+estimate) is `r round(max(model$results$Accuracy)*100,1)`.
+
+We now prepate the testing dataset in the same way we prepared the training
+dataset. We remove missing value fields (only the same ones we removed in
+the training set) and the first 7 columns (again, the same ones we removed
+in the training set). We apply the same Principal Components model that we
+applied in the training set to the testing set (here we remove the last 
+column which is the problem_id)
+
+```{r echo=TRUE, cache=FALSE}
+clean_testing <- testing[, fields_with_missing_vals == 0]
+clean_testing <- clean_testing[, -c(1:7)]
+clean_pca_testing <- predict(prePModel, clean_testing[,-53])
+```
+
+answers <- as.character(predict(model, clean_pca_testing))
+
 
 preProcessModel <- preProcess(training[,-1], method="pca", thresh=0.8)
 pca_training <- predict(preProcessModel, training[,-1])
@@ -54,9 +133,19 @@ pca_testing <- predict(preProcessModel, testing[,-1])
 confusionMatrix(predict(model2, pca_testing), testing$classe)
 
 
-###
 
-The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+###
+d:
+cd D:\Users\d309144\Documents\Coursera\DataScience\ml_project\ML_Project
+cp D:\Users\d309144\Documents\Coursera\DataScience\mach_learn_project.Rmd .
+cp D:\Users\d309144\Documents\Coursera\DataScience\mach_learn_project.html index.html
+git add .
+git commit -m "tweaked code"
+git push origin gh-pages
+
+
+The goal of your project is to predict the manner in which they did the exercise. This is the
+"classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
 
 1. Your submission should consist of a link to a Github repo with your R markdown and compiled HTML file describing your analysis. Please constrain the text of the writeup to < 2000 words and the number of figures to be less than 5. It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online (and you always want to make it easy on graders :-).
 2. You should also apply your machine learning algorithm to the 20 test cases available in the test data above. Please submit your predictions in appropriate format to the programming assignment for automated grading. See the programming assignment for additional details. 
