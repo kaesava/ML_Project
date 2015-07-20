@@ -71,37 +71,63 @@ img {
 <p>We use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to build a model to determine if the barbell lifts were being performed correctly or incorrectly.</p>
 <p>The data for this project come from this source: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a>.</p>
 <p>The authors have very kindly made the data available for this kind of assignment.</p>
-<div id="section" class="section level9">
-<p></p>
-<p>writeup to &lt; 2000 words and the number of figures to be less than 5. It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online (</p>
-<p>The data for this project come from this source: <a href="http://groupware.les.inf.puc-rio.br/har" class="uri">http://groupware.les.inf.puc-rio.br/har</a>. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.</p>
-<p>Please, cite this paper to refer the WLE dataset</p>
-<p>Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13) . Stuttgart, Germany: ACM SIGCHI, 2013. #######</p>
 <p>The training and testing datasets were downloaded on 16-Jul-2015 at 11:45AM Australian Eastern Standard time AEST from the links below: training: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" class="uri">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv</a> testing: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv" class="uri">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv</a></p>
-<p>First we loaded R libraries that we will use (ggplot2 for plotting and caret for datamining related functions). We set the seed seed for reproducibility and read the training and testing datasets that we downloaded.</p>
-<pre class="r"><code>training &lt;- read.table(&quot;pml-training.csv&quot;, header=TRUE, sep=&quot;,&quot;, 
-                   na.strings=&quot;NA&quot;, comment.char=&quot;&quot;,nrows = 19624, quote=&quot;\&quot;&quot;)
-testing &lt;- read.table(&quot;pml-testing.csv&quot;, header=TRUE, sep=&quot;,&quot;,
-                  na.strings=&quot;NA&quot;, comment.char=&quot;&quot;,nrows = 21, quote=&quot;\&quot;&quot;)
+<p>First we loaded R libraries that we will use. We set the seed for reproducibility and take advantage of available parallel processing.</p>
+<p>We then read the training and testing csv files that we downloaded into datasets. Exploring the data, it is clear that missing values are coded as “NA”. However there are also values coded as “#DIV/0!”, which presumably is an error from a spreadsheeting program like Excel. We mark these as NA too.</p>
+<pre class="r"><code>require(dplyr)
+require(ggplot2)
+require(caret)
+require(klaR)
+require(doParallel)
 
-require(ggplot2)</code></pre>
-<pre><code>## Loading required package: ggplot2</code></pre>
-<pre class="r"><code>require(caret)</code></pre>
-<pre><code>## Loading required package: caret</code></pre>
-<pre><code>## Warning: package 'caret' was built under R version 3.2.1</code></pre>
-<pre><code>## Loading required package: lattice</code></pre>
-<pre class="r"><code>set.seed(3433)</code></pre>
-<p>model1 = train(classe~., method=“glm”, data=training) confusionMatrix(predict(model1, testing), testing$classe)</p>
-<p>preProcessModel &lt;- preProcess(training[,-1], method=“pca”, thresh=0.8) pca_training &lt;- predict(preProcessModel, training[,-1]) model2 &lt;- train(training$classe~., method=“glm”, data=pca_training)</p>
-<p>pca_testing &lt;- predict(preProcessModel, testing[,-1]) confusionMatrix(predict(model2, pca_testing), testing$classe)</p>
-</div>
-<div id="section-1" class="section level3">
+set.seed(3433)
+
+registerDoParallel(cores=2)
+
+training &lt;- read.table(&quot;pml-training.csv&quot;, header=TRUE, sep=&quot;,&quot;, 
+    na.strings=c(&quot;NA&quot;, &quot;#DIV/0!&quot;), comment.char=&quot;&quot;,nrows = 19624, quote=&quot;\&quot;&quot;)
+testing &lt;- read.table(&quot;pml-testing.csv&quot;, header=TRUE, sep=&quot;,&quot;,
+    na.strings=c(&quot;NA&quot;, &quot;#DIV/0!&quot;), comment.char=&quot;&quot;,nrows = 21, quote=&quot;\&quot;&quot;)</code></pre>
+<p>We investigate the training dataset for missing values.</p>
+<pre class="r"><code>fields_with_missing_vals &lt;- sapply(training, function(x) sum(is.na(x)))
+table(fields_with_missing_vals)</code></pre>
+<pre><code>## fields_with_missing_vals
+##     0 19216 19217 19218 19220 19221 19225 19226 19227 19248 19293 19294 
+##    60    67     1     1     1     4     1     4     2     2     1     1 
+## 19296 19299 19300 19301 19622 
+##     2     1     4     2     6</code></pre>
+<p>There are 60 fields with no missing values, and 100 with 19,216 or more missing values! Given we only have 19,622 records in the training data set, including these fields with over ~98% missing values will skew the results. We exclude them from the analysis.</p>
+<p>Further: Looking at the data, it seems like the data with missing values are functions (like max, min, skewness, etc.) of existing raw data columns.</p>
+<pre class="r"><code>clean_training &lt;- training[, fields_with_missing_vals == 0]</code></pre>
+<p>Also, the first field (serial #) and user name and date fields qualify each record and for the purpose of this exercise, and so we exclude them in the analysis. The time-stamp and window fields are also markers for time-frame related data and while a full time-series analysis might include them, we exclude them to focus on the time-independent impact of the measurement variables on the classe.</p>
+<pre class="r"><code>clean_training &lt;- clean_training[, -c(1:7)]</code></pre>
+<p>We then run a Principal components analysis to determine variables that have the most impact (account for most discrimination/variance) on the classe variable. We use a variance threshold of 85%. This significantly reduces the domain space while largely keeping the impactful variables. We remove the last (classe) variable when building the pre-processing model.</p>
+<pre class="r"><code>prePModel &lt;- preProcess(clean_training[,-53], method=&quot;pca&quot;, thresh = 0.85)
+clean_pca_training &lt;- predict(prePModel, clean_training[,-53])</code></pre>
+<p>The dataset now has 15 columns/predictors instead of 52 predictors.</p>
+<p>Since we do not have separate testing and validation data sets, we choose to use 10-fold cross-validation, which is quite commonly used to ensure that the model is not over-fit to the training set; i.e., the out of sample error rate is more realistic (less optimistic). Effectively, the training set is partitioned 10 times and one partition is used as the testing (validation) dataset and the others as training, and this is repeated for each partition; the best aggregate model is selected.</p>
+<pre class="r"><code>trc &lt;- trainControl(method = &quot;cv&quot;, number = 10)
+model &lt;- train(clean_pca_training, clean_training$classe, 
+               method=&quot;rf&quot;, trControl=trc)</code></pre>
+<pre><code>## Loading required package: randomForest</code></pre>
+<pre><code>## Warning: package 'randomForest' was built under R version 3.2.1</code></pre>
+<pre><code>## randomForest 4.6-10
+## Type rfNews() to see new features/changes/bug fixes.
+## 
+## Attaching package: 'randomForest'
+## 
+## The following object is masked from 'package:dplyr':
+## 
+##     combine</code></pre>
+<p>We expect the out-of-sample error to be 97.7.</p>
+<p>We now prepate the testing dataset in the same way we prepared the training dataset. We remove missing value fields (only the same ones we removed in the training set) and the first 7 columns (again, the same ones we removed in the training set). We apply the same Principal Components model that we applied in the training set to the testing set (here we remove the last column which is the problem_id)</p>
+<pre class="r"><code>clean_testing &lt;- testing[, fields_with_missing_vals == 0]
+clean_testing &lt;- clean_testing[, -c(1:7)]
+clean_pca_testing &lt;- predict(prePModel, clean_testing[,-53])
+answers &lt;- as.character(predict(model, clean_pca_testing))</code></pre>
+<div id="section" class="section level3">
 <h3></h3>
-<p>The goal of your project is to predict the manner in which they did the exercise. This is the “classe” variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.</p>
-<ol style="list-style-type: decimal">
-<li>Your submission should consist of a link to a Github repo with your R markdown and compiled HTML file describing your analysis. Please constrain the text of the writeup to &lt; 2000 words and the number of figures to be less than 5. It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online (and you always want to make it easy on graders :-).</li>
-<li>You should also apply your machine learning algorithm to the 20 test cases available in the test data above. Please submit your predictions in appropriate format to the programming assignment for automated grading. See the programming assignment for additional details.</li>
-</ol>
+<p>d: cd D:309144_project_Project cp D:309144_learn_project.Rmd . cp D:309144_learn_project.html index.html git add . git commit -m “submission of first attempt” git push origin gh-pages</p>
 <p>Does the submission build a machine learning algorithm to predict activity quality from activity monitors?</p>
 <p>To evaluate the HTML file you may have to download the repo and open the compiled HTML document.</p>
 <p>Alternatively if they have submitted a repo with a gh-pages branch, you may be able to view the HTML page on the web.</p>
